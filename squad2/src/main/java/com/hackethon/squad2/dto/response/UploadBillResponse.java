@@ -19,7 +19,7 @@ public class UploadBillResponse implements Serializable {
 
     private String title;
     private BigDecimal totalAmount;
-    private BigDecimal subtotalAmount;
+    private BigDecimal subTotalAmount;
     private BigDecimal taxAmount;
     private BigDecimal serviceAmount;
     private BigDecimal discount;

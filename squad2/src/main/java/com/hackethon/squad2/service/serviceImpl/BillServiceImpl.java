@@ -268,7 +268,7 @@ public class BillServiceImpl implements BIllService {
     }
 
     @Override
-    public String uploadFile(UploadBillRequest request) {
+    public BaseResponseDto<UploadBillResponse> uploadFile(UploadBillRequest request) throws JsonProcessingException {
 
         try {
             RestTemplate restTemplate = new RestTemplate();
@@ -288,45 +288,27 @@ public class BillServiceImpl implements BIllService {
                     req,
                     String.class
             );
-            log.info("TEXT : {}", ocrResponse.getBody());
-            return ocrResponse.getBody();
-        } catch (RuntimeException e) {
-            throw new RuntimeException(e);
-        }
-    }
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode root = null;
+            try {
+                root = mapper.readTree(ocrResponse.getBody());
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException(e);
+            }
 
-    @Override
-    public String uploadFileFromFile(MultipartFile request) {
-        RestTemplate restTemplate = new RestTemplate();
+            String rawText = root.get("raw_text").asText();
+            log.info("Raw Text : " + rawText);
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
-
-        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-        body.add("file", request.getResource());
-
-        HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
-
-        ResponseEntity<String> response = restTemplate.exchange(ocrServiceUrl, HttpMethod.POST, requestEntity, String.class);
-        ObjectMapper mapper = new ObjectMapper();
-        JsonNode root = null;
-        try {
-            root = mapper.readTree(response.getBody());
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException(e);
-        }
-
-        String rawText = root.get("raw_text").asText();
-        log.info("Raw Text : " + rawText);
-
-        String prompt = "Tolong buat hasil ocr ini " + rawText +
+            String prompt = "Tolong buat hasil ocr ini " + rawText +
                     " format kedalam JSON saja tanpa deskripsi apapun, seperti format berikut: "
                     + "{" +
-                    "\"totalAmount\" : \"\",\n" +
-                    "\"subTotal\" : \"\",\n" +
-                    "\"discount\" : \"\",\n" +
-                    "\"tax\" : \"\",\n" +
-                    "\"serviceFee\" : \"\",\n" +
+                    "\"title\" : \"\",\n" +
+                    "\"totalAmount\" : ,\n" +
+                    "\"subTotalAmount\" : ,\n" +
+                    "\"discount\" : ,\n" +
+                    "\"others\" : ,\n" +
+                    "\"taxAmount\" : ,\n" +
+                    "\"serviceAmount\" : ,\n" +
                     "\"items\" : [\n" +
                     "    {\n" +
                     "        \"name\" : \"\",\n" +
@@ -341,6 +323,96 @@ public class BillServiceImpl implements BIllService {
                     "        ]\n" +
                     "    }\n" +
                     "]}";
+
+
+            OpenAiRequest reqOpenAi = new OpenAiRequest(prompt);
+
+            HttpHeaders header = new HttpHeaders();
+            header.setContentType(MediaType.APPLICATION_JSON);
+
+            HttpEntity<OpenAiRequest> entity = new HttpEntity<>(reqOpenAi, header);
+
+            ResponseEntity<OpenAiResponse> res = restTemplate.exchange(
+                    googleApiUrl.concat(apiKey),
+                    HttpMethod.POST,
+                    entity,
+                    OpenAiResponse.class
+            );
+
+            OpenAiResponse bodi = res.getBody();
+            if (bodi != null && !bodi.candidates.isEmpty()) {
+                var text = bodi.candidates.get(0).content.parts.get(0).text;
+                int start = text.indexOf('{');
+                int end = text.lastIndexOf('}');
+
+                if (start != -1 && end != -1 && end > start) {
+                    String json = text.substring(start, end + 1);
+                    ObjectMapper map = new ObjectMapper();
+                    UploadBillResponse uploadBillResponse = map.readValue(json, UploadBillResponse.class);
+                    return BaseResponseDto.<UploadBillResponse>builder()
+                            .data(uploadBillResponse)
+                            .build();
+                } else {
+                    return new BaseResponseDto<UploadBillResponse>();
+                }
+            } else {
+                return new BaseResponseDto<>();
+            }
+        } catch (RuntimeException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
+    public BaseResponseDto<UploadBillResponse> uploadFileFromFile(MultipartFile request) throws JsonProcessingException {
+        try {
+            RestTemplate restTemplate = new RestTemplate();
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+            MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+            body.add("file", request.getResource());
+
+            HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
+
+            ResponseEntity<String> response = restTemplate.exchange(ocrServiceUrl, HttpMethod.POST, requestEntity, String.class);
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode root = null;
+            try {
+                root = mapper.readTree(response.getBody());
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException(e);
+            }
+
+            String rawText = root.get("raw_text").asText();
+            log.info("Raw Text : " + rawText);
+
+            String prompt = "Tolong buat hasil ocr ini " + rawText +
+                    " format kedalam JSON saja tanpa deskripsi apapun, seperti format berikut: "
+                    + "{" +
+                    "\"title\" : \"\",\n" +
+                    "\"totalAmount\" : ,\n" +
+                    "\"subTotalAmount\" : ,\n" +
+                    "\"discount\" : ,\n" +
+                    "\"others\" : ,\n" +
+                    "\"taxAmount\" : ,\n" +
+                    "\"serviceAmount\" : ,\n" +
+                    "\"items\" : [\n" +
+                    "    {\n" +
+                    "        \"name\" : \"\",\n" +
+                    "        \"quantity\" : \"\",\n" +
+                    "        \"price\" : \"\",\n" +
+                    "        \"subItems\" : [\n" +
+                    "            {\n" +
+                    "                \"name\" : \"\",\n" +
+                    "                \"quantity\" : \"\",\n" +
+                    "                \"price\" : \"\"\n" +
+                    "            }\n" +
+                    "        ]\n" +
+                    "    }\n" +
+                    "]}";
+
 
             OpenAiRequest req = new OpenAiRequest(prompt);
 
@@ -358,10 +430,26 @@ public class BillServiceImpl implements BIllService {
 
             OpenAiResponse bodi = res.getBody();
             if (bodi != null && !bodi.candidates.isEmpty()) {
-                return bodi.candidates.get(0).content.parts.get(0).text;
+                var text = bodi.candidates.get(0).content.parts.get(0).text;
+                int start = text.indexOf('{');
+                int end = text.lastIndexOf('}');
+
+                if (start != -1 && end != -1 && end > start) {
+                    String json = text.substring(start, end + 1);
+                    ObjectMapper map = new ObjectMapper();
+                    UploadBillResponse uploadBillResponse = map.readValue(json, UploadBillResponse.class);
+                    return BaseResponseDto.<UploadBillResponse>builder()
+                            .data(uploadBillResponse)
+                            .build();
+                } else {
+                    return new BaseResponseDto<UploadBillResponse>();
+                }
             } else {
-                return "No response from Gemini.";
+                return new BaseResponseDto<>();
             }
+        } catch (RuntimeException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override

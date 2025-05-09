@@ -45,12 +45,12 @@ public class BillController {
     }
 
     @PostMapping("/execute-bill-image")
-    public String extractText(@RequestBody UploadBillRequest request) throws IOException {
+    public BaseResponseDto<UploadBillResponse> extractText(@RequestBody UploadBillRequest request) throws IOException {
         return bIllService.uploadFile(request);
     }
 
     @PostMapping("/execute-bill-image-from-File")
-    public String extractTextFromFile(@RequestParam("file") MultipartFile file) throws IOException {
+    public BaseResponseDto<UploadBillResponse> extractTextFromFile(@RequestParam("file") MultipartFile file) throws IOException {
         return bIllService.uploadFileFromFile(file);
     }
 
